@@ -1,12 +1,24 @@
 {
   "name": "RelayModule",
-  "version": "0.2.5",
-  "description": "relay subdevice library for an HDL-Buspro-style RS485 bus. WARNING: wire frame format is a placeholder pending verification against real captures -- see README.",
-  "keywords": ["relay", "rs485", "hdl", "buspro", "stm32", "home-automation"],
+  "version": "0.3.0",
+  "description": "Relay subdevice library for an HDL-Buspro-style RS485 bus. Implements scene control, channel configuration, zone management, and single/reversing channel control as a BusproCore subdevice, with state persisted via MemoryCore. Scene modify/remark persistence is still incomplete -- see README known issues.",
+  "keywords": [
+    "relay",
+    "rs485",
+    "hdl",
+    "buspro",
+    "stm32",
+    "home-automation"
+  ],
   "frameworks": "arduino",
-  "platforms": ["ststm32", "atmelavr", "*"],
-  "headers": "Relay4R.h",
+  "platforms": [
+    "ststm32",
+    "atmelavr",
+    "*"
+  ],
+  "headers": "RelayModule.h",
   "dependencies": {
-    "BusproCore": "^0.1.0"
+    "BusproCore": "^0.1.0",
+    "MemoryCore": "^0.1.0"
   }
 }
