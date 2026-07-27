@@ -1,150 +1,209 @@
-# RelayModule — RelayModule Relay Subdevice Library (HDL Buspro-style)
+# RelayModule — HDL Buspro-style Relay Subdevice Library
 
-Arduino-framework library (works with STM32duino / "STM32 Cores" board package)
-for a up to 32 relay board that acts as a **subdevice** on a shared RS485 bus,
-using HDL Buspro-style addressing (Subnet ID / Device ID) and operation codes.
+Arduino-framework library (STM32duino / "STM32 Cores" board package) implementing
+a multi-channel relay subdevice on a shared RS485 bus using the HDL Buspro
+wire protocol. Built on `BusproCore` (frame codec + transport + op-code dispatch)
+and `MemoryCore` (STM32 flash journaling/storage).
 
-## Depends on BusproCore
+> **Docs status:** This README reflects the code as of the current `main` branch.
+> The wire-level frame format (sync bytes, length field, CRC16/XMODEM) has already
+> been empirically verified against real captured HDL Buspro frames in `BusproCore`
+> — this library no longer runs on a placeholder frame format.
 
-This library now depends on a separate `BusproCore` library, which holds the
-shared frame codec, transport (RS485 DE/RE, address filtering), and dispatch
-layer used by **every** subdevice on the bus (4R, 4Z, and future boards).
-Install `BusproCore` alongside this library. See `BusproCore`'s README for
-why this split exists and the full op-code registry across devices.
+## Dependencies
 
-## ⚠️ CRITICAL: Frame layer is NOT yet verified against real HDL Buspro hardware
+- `BusproCore` — `BusproFrame`, `BusproTransport`, `BusproDevice`, `BusproOp`,
+  `BusproContext`, `Universal`, `Helpers`
+- `MemoryCore` — flash-backed key/value storage (STM32F103 journaling scheme)
 
-This applies to `BusproCore`, not this library directly -- but it governs
-everything 4R sends/receives on the wire. See `BusproCore/README.md` and
-`BusproCore/src/BusproFrame.cpp` for the full placeholder-format breakdown
-and verification plan (`docs/CAPTURE_TEMPLATE.md`).
-
-This library's own layers:
-
-```
-src/Relay4R.h/.cpp    <-- relay control + scene logic (the actual "4R" device)
-src/SceneStore.h        <-- Area+Scene -> 4-relay-state mapping (RAM-backed for now)
-```
-
-(BusproFrame / BusproTransport / BusproDevice now live in BusproCore --
-see that library if you need to touch wire-level encoding.)
-
-**Do not deploy this on a bus with real HDL Buspro devices until
-`BusproCore/src/BusproFrame.cpp` has been verified against a real capture.**
-Every place that needs verification is marked `// TODO_VERIFY_HDL` in that
-source file. Specifically unverified (full detail in `BusproCore/README.md`):
-
-1. Sync/leading byte pattern (placeholder: `0xAA 0xAA`)
-2. Length field meaning (placeholder: total bytes following the length byte, CRC included)
-3. CRC algorithm (placeholder: simple 16-bit additive checksum — NOT real HDL CRC16)
-4. Field byte order (placeholder: big-endian for multi-byte fields, matching the
-   op-code byte order shown in HDL documentation excerpts)
-
-### How to verify (recommended path)
-
-See `docs/CAPTURE_TEMPLATE.md` in this repo for the full capture procedure.
-Once confirmed, update **only** `BusproCore/src/BusproFrame.cpp` — no other
-file in BusproCore, RelayModule, or InputModule should need to change, since everything above
-that layer only depends on the decoded `BusproFrame` struct, not on
-wire-level details. Fixing it once in BusproCore fixes it for every device
-library that depends on it.
+Both must be installed alongside this library; `RelayModule.h` includes headers
+from both directly.
 
 ## Architecture
 
 ```
-                 ┌─────────────────────────────────────────┐
-   RS485 bus --> │ BusproTransport (byte stream, DE/RE pin) │   } from
-  (shared with   │   - finds frame boundaries via Frame     │   } BusproCore
-   other         │   - filters: is this frame for ME?       │   } (shared with
-   subdevices)   └───────────────────┬───────────────────────┘   } 4Z, etc.)
-                                      │ BusproFrame (decoded struct)
-                                      v
-                 ┌─────────────────────────────────────────┐
-                 │ BusproDevice (op-code dispatch table)     │   }
-                 │   - 0x0002 Scene Control                  │   } also from
-                 │   - 0x0031/0x0032 Single Channel Control  │   } BusproCore
-                 │   - 0x0033/0x0034 Read Status             │   }
-                 │   - (extensible: register more handlers)  │
-                 └───────────────────┬───────────────────────┘
-                                      │ calls into
-                                      v
-                 ┌───────────────────────────────────────────┐
-                 │ RelayModule (the actual device)           │   } this
-                 │   - up to 32 relay channels (GPIO control)│   } library
-                 │   - scene table (Area+Scene -> 4 states)  │   } (depends on
-                 │   - RAM-only for now; ISceneStore         │   } BusproCore)
-                 │     interface ready for EEPROM/Flash later│
-                 └───────────────────────────────────────────┘
+RS485 bus --> BusproTransport (frame boundaries, address filtering)   } BusproCore
+                        │ BusproFrame (decoded)
+                        v
+              RelayModule::process()  --  op-code switch/dispatch
+                        │
+          ┌─────────────┴─────────────┐
+          v                           v
+  RelayModule (config/state:    RelayController (on/off + status
+  channels, zones, scenes,      + reversing control op-codes)
+  device identity — all
+  persisted via MemoryCore)
 ```
 
-## Supported operations (so far)
+`RelayModule` owns device state, flash persistence, and configuration op-codes.
+`RelayController` (composed inside `RelayModule`) owns the actual channel
+control/status op-codes (`CONTROL_SINGLE`, `CONTROL_REVERSING`).
 
-| Operation | Code | Direction | Notes |
-|---|---|---|---|
-| Scene Control | `0x0002` | Master -> 4R | Area (1-254) + Scene (0-254, 0=stop) |
-| Single Channel Control | `0x0031` (req) / `0x0032` (resp) | Master <-> 4R | On/Off/Toggle per relay channel |
-| Read Status | `0x0033` (req) / `0x0034` (resp) | Master <-> 4R | Returns current state of all 4 relays |
+## Device variants
 
-(Op-codes for single-channel control/status are also placeholders pending
-verification — only `0x0002` was given to me as confirmed by the user; the
-others follow the same numbering family pattern from public HDL documentation
-excerpts and are marked accordingly.)
+Channel count and HDL device type code are chosen at **compile time** via a
+`#define` near the top of `RelayModule.h` (currently hardcoded to `RELAY4`):
 
-## Scene table
+| Define      | Channels | `RELAY_TYPE` |
+|-------------|----------|--------------|
+| `RELAY1`    | 1        | 5500         |
+| `RELAY2`    | 2        | 5501         |
+| `RELAY3`    | 3        | 467          |
+| `RELAY4`    | 4        | 462          |
+| `RELAY6`    | 6        | 426          |
+| `RELAY8`    | 8        | 463          |
+| `RELAY12`   | 12       | 464          |
+| `RELAY16`   | 16       | 466          |
+| `RELAY24`   | 24       | 432          |
+| `WIRELESS`  | 24       | 6100         |
 
-Scene -> relay-state mapping is **not** sent by the master on every Scene Control
-command (the wire command only carries Area + Scene numbers). The 4R device must
-already know what "Area 3, Scene 5" means in terms of its own 4 relays.
+⚠️ Selection uses `#elifdef`, a C++23 preprocessor directive. Confirm your
+toolchain (arm-none-eabi-gcc via PlatformIO `ststm32` platform) actually
+supports it — if not, this silently compiles the wrong variant with no error.
 
-This library stores that table in RAM (`SceneTableRAM`, see `Relay4R.h`) behind
-an `ISceneStore` interface, and exposes a serial **configuration sub-protocol**
-to let the master (or a config tool) write/read scene entries at runtime. Since
-there's no Flash/EEPROM persistence yet, the table resets on power loss — wire
-up `ISceneStore` to STM32 flash emulation later without changing `Relay4R`.
+`CURTAIN_CHANNEL_COUNT` is always `RELAY_CHANNEL_COUNT / 2` (paired relays
+drive one curtain motor's open/close).
 
-## Hardware assumptions
+## Supported operations
 
-- RS485 transceiver (e.g. MAX485) with a single GPIO controlling combined DE/RE
-- 4 GPIO outputs driving relay channels (active-high by default, configurable)
-- One shared HardwareSerial port also used by other subdevices on the same bus
-  (this device filters by Subnet ID + Device ID and ignores frames not addressed
-  to it, including broadcast handling per HDL convention placeholder)
+All operations dispatch through `RelayModule::process(const BusproFrame&)`,
+split into universal (broadcast, `dstAddress == 0xFFFF`) and addressed
+(`dstAddress == deviceAddress_`) commands.
+
+### Universal (broadcast)
+| Op-code group | Handler |
+|---|---|
+| `DEVICE_SEARCH_HDL` (req) | `handleSearchDevice` |
+| `DEVICE_REMARK` (read req) | `handleReadDeviceRemark` |
+
+### Addressed — device identity
+| Op-code group | Handler |
+|---|---|
+| `DEVICE_FIRMWARE` | `handleReadFirmware` |
+| `DEVICE_HARDWARE` | `handleReadHardware` |
+| `DEVICE_FINDIT` | `handleFindDevice` |
+| `DEVICE_MAC_ADDRESS` (read/write) | `handleReadMacaddress` / `handleModifyMacaddress` |
+| `DEVICE_REMARK` (read/write) | `handleReadDeviceRemark` / `handleModifyDeviceRemark` |
+
+### Addressed — channel configuration
+| Op-code group | Handler |
+|---|---|
+| `CHANNEL_REMARK` (read/write) | `handleReadChannelRemark` / `handleModifyChannelRemark` |
+| `CHANNEL_ONDELAY` (read/write) | `handleReadChannelOndelay` / `handleModifyChannelOndelay` |
+| `CHANNEL_ONPROTECT` (read/write) | `handleReadChannelOnprotect` / `handleModifyChannelOnprotect` |
+| `RELAY_CHANNEL_ENABLE` (read/write) | `handleReadChannelEnable` / `handleModifyChannelEnable` |
+
+### Addressed — zones
+| Op-code group | Handler |
+|---|---|
+| `ZONE_MEMBERS` (read/write) | `handleReadZone` / `handleModifyZone` |
+| `ZONE_REMARK` (read/write) | `handleReadZoneRemark` / `handleModifyZoneRemark` |
+
+### Addressed — scenes
+| Op-code group | Handler | Status |
+|---|---|---|
+| `SCENE_READ` | `handleSceneRead` | working |
+| `SCENE_MODIFY` | `handleSceneModify` | **stub — empty body, not implemented** |
+| `SCENE_REMARK` (read/write) | `handleReadSceneRemark` / `handleModifySceneRemark` | **stub — flash I/O commented out, echoes request only** |
+| `SCENE_POWERON_EN` (read/write) | `handleSceneResumeENRead` / `handleSceneResumeENModify` | see known issues |
+| `SCENE_POWERON_NUM` (read/write) | `handleSceneResumeNumRead` / `handleSceneResumeNumModify` | see known issues |
+
+### Addressed — curtain (paired-relay channels)
+| Op-code group | Handler |
+|---|---|
+| `CURTAIN_CONFIG` (read/write) | `handleCurtainRead` / `handleCurtainModify` |
+
+### Addressed — channel control (via `RelayController`)
+| Op-code group | Handler | Behavior |
+|---|---|---|
+| `CONTROL_SINGLE` (read) | `handleReadStatusRequest` | returns brightness-encoded on/off for all 4 channels |
+| `CONTROL_SINGLE` (write) | `handleSingleChannelControl` | `0x00`→off, `0x64`→on, anything else→off |
+| `CONTROL_REVERSING` | `handleReversingControl` | inverted mapping of the above |
+
+## Known issues / incomplete areas
+
+These are tracked so they don't get lost — fix before relying on the
+corresponding op-codes in production:
+
+1. **`handleModifyChannelEnable` validation bug.** The guard clause uses `&&`
+   where it needs `||`:
+   ```cpp
+   if (frame.payloadLen != (RELAY_CHANNEL_COUNT + 1) &&
+       frame.payload[0] == RELAY_CHANNEL_COUNT)
+       return;
+   ```
+   As written, malformed/short frames are **not** rejected in the normal case,
+   and the handler proceeds to read `frame.payload + 1` for `RELAY_CHANNEL_COUNT`
+   bytes regardless of actual payload length.
+
+2. **`handleSceneResumeENRead` / `handleSceneResumeNumRead` read `payload[0]`
+   after asserting zero payload length.** Both check `payloadLen != 0` and
+   return early, then immediately index `frame.payload[0]` in the flash
+   address lookup — reading past a payload that was just declared empty.
+
+3. **`uint8_t payload[sceneCount];`** in the same two handlers is a
+   variable-length array sized by a runtime member (GCC extension, not
+   portable C++, and zero-sized if `sceneCount == 0`). Replace with a
+   fixed-size buffer bounded by `MAX_SCENE_ENTRIES`.
+
+4. **`SCENE_MODIFY` is unimplemented** (`handleSceneModify` has an empty body
+   — no response is sent, master will time out waiting for an ack).
+
+5. **`SCENE_REMARK` read/write don't touch flash** — the `flash_.read`/
+   `flash_.update` calls are commented out in both handlers, so scene remarks
+   are not actually persisted or retrievable yet.
+
+6. **`handleReadDeviceRemark` responds to broadcast (`0xFFFF`)** while every
+   other handler responds directly to `frame.srcAddress`. Confirm this is
+   intentional per HDL convention (remark reads are sometimes broadcast
+   responses) — otherwise it should target the requester like everything else.
+
+7. **Brightness-to-relay mapping only recognizes `0x00`/`0x64` explicitly**;
+   any other value silently maps to off with no error/log. Fine for a pure
+   on/off relay, but worth a comment so it isn't mistaken for a bug later.
 
 ## Quick start
 
 ```cpp
-#include <Relay4R.h>
+#include <RelayModule.h>
 
-// Subnet ID, Device ID, RS485 DE/RE pin, relay pins
-Relay4R relay4r(1, 12, /*dePin=*/PA8, (uint8_t[]){PB0, PB1, PB2, PB3});
+BusproTransport bus(Serial1, /*dePin=*/PA8);
+MemoryCore flash(/* ... */);
+
+const uint8_t relayPins[RELAY_CHANNEL_COUNT] = {PB0, PB1, PB2, PB3};
+RelayModule relay(bus, flash, /*sectorAddress=*/0, relayPins);
 
 void setup() {
   Serial1.begin(9600);
-  relay4r.begin(&Serial1);
+  relay.begin();
 }
 
 void loop() {
-  relay4r.poll(); // non-blocking; call frequently
+  // pump bus.poll()/dispatch loop, calling relay.process(frame) per BusproCore's
+  // dispatch mechanism
 }
 ```
 
-## Running the desktop logic tests
+## Flash-backed state
 
-The library logic (dispatch, addressing, scene lookup, encode/decode
-roundtrip) can be tested on a desktop machine without any STM32 hardware,
-using a minimal Arduino API stub in `test_stubs/`. This requires BusproCore
-checked out alongside this library (adjust the path below to wherever you
-placed it):
+Device identity, channel config (remark/enable/on-delay/on-protect), zone
+membership/remarks, and scene data are persisted via `MemoryCore` at a caller
+supplied `sectorAddress`. On `begin()`, `firstime()` checks the stored MCU UID
+and device type against flash; if either differs (fresh chip or firmware
+device-type change), `init()` reinitializes defaults, then `syncValues()`
+loads working state from flash into RAM.
 
-```sh
-g++ -std=c++17 -Wall -Wextra \
-  -I test_stubs -I src -I ../BusproCore/src \
-  ../BusproCore/src/BusproFrame.cpp ../BusproCore/src/BusproTransport.cpp \
-  src/Relay4R.cpp test_stubs/test_main.cpp -o test_4r
-./test_4r
+## Repo layout (actual, current)
+
+```
+src/RelayModule.h/.cpp       -- device state, flash persistence, config op-codes
+src/RelayController.h/.cpp   -- on/off + reversing control, status read
+docs/CAPTURE_TEMPLATE.md     -- historical: HDL frame-capture worksheet used
+                                 during BusproCore wire-format verification
+                                 (verification is done; kept for reference)
 ```
 
-This validates the C++ logic only -- it cannot validate real HDL wire
-compatibility, since the frame format itself is still a placeholder
-(see warning at the top of this file).
-
+`Relay4R.h`, `SceneStore.h` as a standalone header, and the desktop
+`test_stubs/` test suite referenced in older docs do not exist in the current
+tree — `library.json`/`library.properties` still point at `Relay4R.h` as the
+main include and should be updated to `RelayModule.h`.
