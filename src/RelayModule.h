@@ -80,12 +80,11 @@ public:
     RelayModule(
         BusproTransport &bus,
         MemoryCore &flash,
-        uint32_t sectorAddress,
         const uint8_t relayPins[RELAY_CHANNEL_COUNT],
         bool activeHigh = true);
 
     bool begin();
-
+    void update();
     bool firstime();
 
     bool init();
@@ -115,15 +114,17 @@ public:
     uint32_t memoryAddress() const { return memoryaddress_; }
 
 private:
+    static constexpr const char *SOFTWARE_VERSION = "v0.10.0-beta";
+
     void applyRelayHardware(uint8_t channel);
     // void readMcuUID();
 
-    uint32_t memoryaddress_; // its the refrens address of data on memoryflash
+    uint32_t memoryaddress_ = MemoryAdress::Relay::SECTOR_INFO; // its the refrens address of data on memoryflash
 
     BusproTransport &bus_;
     MemoryCore &flash_;
 
-    uint16_t deviceAddress_ = 0x0120;
+    uint16_t deviceAddress_ = 0x0141;
     uint8_t fuid_[12];
     uint8_t uid_[12];
     uint16_t devType_ = RELAY_TYPE; // 4R device type per HDL spec

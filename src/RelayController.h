@@ -15,4 +15,6 @@ public:
 
 private:
     RelayModule &module_;
+
+    uint8_t relayToBrightness(uint8_t brighness);
 };
