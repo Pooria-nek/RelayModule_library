@@ -11,7 +11,7 @@ void RelayController::handleSingleChannelControl(const BusproFrame &frame)
 {
     if (frame.payloadLen < 4)
         return;
-
+        
     const uint8_t lightChannelNo = frame.payload[0];
     const uint8_t Brightness = frame.payload[1];  // 0x00 -> low 0x64 -> high
     const uint8_t highRuntime = frame.payload[2]; // TODO

@@ -7,6 +7,8 @@
 #include "MemoryCore.h"
 
 #include "RelayController.h"
+#include "RelayStorage.h"
+#include "ZoneStorage.h"
 
 #define RELAY4
 
@@ -14,12 +16,24 @@
 #ifdef RELAY1
 constexpr uint8_t RELAY_CHANNEL_COUNT = 1;
 constexpr uint16_t RELAY_TYPE = 5500; //
+
+constexpr uint8_t maxZone = 1;
+constexpr uint8_t maxScene = 1;
+
 #elifdef RELAY2
 constexpr uint8_t RELAY_CHANNEL_COUNT = 2;
 constexpr uint16_t RELAY_TYPE = 5501; //
+
+constexpr uint8_t maxZone = 1;
+constexpr uint8_t maxScene = 1;
+
 #elifdef RELAY3
 constexpr uint8_t RELAY_CHANNEL_COUNT = 3;
 constexpr uint16_t RELAY_TYPE = 467; // on protect | stair light - AC setting
+
+constexpr uint8_t maxZone = 1;
+constexpr uint8_t maxScene = 1;
+
 #elifdef RELAY4
 constexpr uint8_t RELAY_CHANNEL_COUNT = 4;
 // constexpr uint16_t RELAY_TYPE = 423; // sequence - stair light
@@ -33,6 +47,10 @@ constexpr uint8_t RELAY_CHANNEL_COUNT = 4;
 // constexpr uint16_t RELAY_TYPE = 444; // on protect | sequence - stair light
 // constexpr uint16_t RELAY_TYPE = 447; // on protect | sequence - stair light
 constexpr uint16_t RELAY_TYPE = 462; // curtain
+
+constexpr uint8_t maxZone = 1;
+constexpr uint8_t maxScene = 1;
+
 #elifdef RELAY6
 constexpr uint8_t RELAY_CHANNEL_COUNT = 6;
 // constexpr uint16_t RELAY_TYPE = 425; // sequence
@@ -87,9 +105,10 @@ public:
     void update();
     bool firstime();
 
+    bool reMatch();
+
     bool init();
 
-    uint8_t maxZone();
     bool syncValues();
 
     void process(const BusproFrame &frame);
@@ -107,19 +126,31 @@ public:
     // bool defineScene(uint8_t area, uint8_t scene, const bool states[RELAY_CHANNEL_COUNT]);
     // bool removeScene(uint8_t area, uint8_t scene);
 
+    void sendSuccess(uint16_t opcode, uint16_t dst);
     void sendResponse(uint16_t opcode, uint16_t dst, const uint8_t *payload, uint8_t payloadLen);
 
     MemoryCore &flash() { return flash_; }
 
-    uint32_t memoryAddress() const { return memoryaddress_; }
+    uint32_t memoryAddress() const { return flashAddress; }
 
 private:
-    static constexpr const char *SOFTWARE_VERSION = "v0.10.0-beta";
+    static constexpr const char *FACTORY_NAME = "Zeller 4R";
+    static constexpr const char *HARDWARE_VERSION = "Non latch";
+    static constexpr const char *SOFTWARE_VERSION = "v1.0.0-beta";
+
+    static constexpr uint32_t flashAddress = 50; // its the refrens address of data on memoryflash
+
+    using InfoStorageLayout = RelayStorage<
+        flashAddress, // Main sector index / reference address
+        RELAY_CHANNEL_COUNT>;
+
+    using ZoneStorageLayout = ZoneStorage<
+        flashAddress,       // Main sector index
+        RELAY_CHANNEL_COUNT // Channel count: 8 zones, 16 scenes per zone
+        >;
 
     void applyRelayHardware(uint8_t channel);
     // void readMcuUID();
-
-    uint32_t memoryaddress_ = MemoryAdress::Relay::SECTOR_INFO; // its the refrens address of data on memoryflash
 
     BusproTransport &bus_;
     MemoryCore &flash_;
@@ -129,7 +160,7 @@ private:
     uint8_t uid_[12];
     uint16_t devType_ = RELAY_TYPE; // 4R device type per HDL spec
 
-    uint8_t sceneCount = 0;
+    uint8_t sceneCount = maxZone;
     uint8_t sceneActive = 0;
     uint8_t relayPins_[RELAY_CHANNEL_COUNT];
     bool relayState_[RELAY_CHANNEL_COUNT] = {false};
