@@ -778,7 +778,27 @@ void RelayModule::handleModifyMacaddress(const BusproFrame &frame)
 
 void RelayModule::handleReadDeviceRemark(const BusproFrame &frame)
 {
+    static uint32_t lastResponseTime = 0;
+    static bool hasResponded = false;
+
     if (frame.payloadLen != 0)
+        return;
+
+    uint32_t now = millis();
+
+    // 10-second cooldown after the previous response.
+    if (hasResponded &&
+        (uint32_t)(now - lastResponseTime) < 10000)
+        return;
+
+    // Random delay to reduce simultaneous responses.
+    delay(random(100, 2001));
+
+    // Check cooldown again in case time passed during the delay.
+    now = millis();
+
+    if (hasResponded &&
+        (uint32_t)(now - lastResponseTime) < 10000)
         return;
 
     uint8_t payload[20];
