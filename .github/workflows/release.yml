@@ -1,0 +1,120 @@
+
+name: Release Library
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - ".github/workflows/**"
+      - "README.md"
+      - "docs/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: library-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read and validate version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PIO_VERSION=$(python -c "import json; print(json.load(open('library.json'))['version'])")
+          ARDUINO_VERSION=$(grep -E '^version=' library.properties | cut -d= -f2 | tr -d '[:space:]')
+
+          if [ -z "$PIO_VERSION" ] || [ -z "$ARDUINO_VERSION" ]; then
+            echo "Could not read library version."
+            exit 1
+          fi
+
+          if [ "$PIO_VERSION" != "$ARDUINO_VERSION" ]; then
+            echo "Version mismatch!"
+            echo "library.json: $PIO_VERSION"
+            echo "library.properties: $ARDUINO_VERSION"
+            exit 1
+          fi
+
+          if ! [[ "$PIO_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid semantic version: $PIO_VERSION"
+            exit 1
+          fi
+
+          echo "version=$PIO_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$PIO_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether version is already released
+        id: check
+        shell: bash
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Version $TAG already exists. Skipping release."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        if: steps.check.outputs.exists == 'false'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install PlatformIO
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          python -m pip install --upgrade platformio
+
+      - name: Validate and package library
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          pio pkg pack --output /tmp/RelayModule.tar.gz
+
+      - name: Publish to PlatformIO Registry
+        if: steps.check.outputs.exists == 'false'
+        env:
+          PLATFORMIO_AUTH_TOKEN: ${{ secrets.PLATFORMIO_AUTH_TOKEN }}
+        run: |
+          if [ -z "$PLATFORMIO_AUTH_TOKEN" ]; then
+            echo "Missing PLATFORMIO_AUTH_TOKEN secret."
+            exit 1
+          fi
+
+          pio pkg publish /tmp/RelayModule.tar.gz --no-interactive
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "RelayModule $TAG" \
+            --generate-notes
+
+      - name: Release summary
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          echo "## RelayModule release completed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: ${{ steps.version.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Tag: ${{ steps.version.outputs.tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- PlatformIO Registry: published" >> "$GITHUB_STEP_SUMMARY"
+          echo "- GitHub Release: created" >> "$GITHUB_STEP_SUMMARY"
