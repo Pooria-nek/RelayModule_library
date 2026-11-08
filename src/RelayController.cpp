@@ -11,7 +11,7 @@ void RelayController::handleSingleChannelControl(const BusproFrame &frame)
 {
     if (frame.payloadLen < 4)
         return;
-        
+
     const uint8_t lightChannelNo = frame.payload[0];
     const uint8_t Brightness = frame.payload[1];  // 0x00 -> low 0x64 -> high
     const uint8_t highRuntime = frame.payload[2]; // TODO
@@ -33,7 +33,7 @@ void RelayController::handleSingleChannelControl(const BusproFrame &frame)
     module_.setRelay(channel, newState);
 
     uint8_t payload[] = {lightChannelNo, BusproOp::SUCCESS, Brightness, RELAY_CHANNEL_COUNT, 0};
-    module_.sendResponse(BusproOp::CONTROL_SINGLE.resp(), frame.srcAddress, payload, sizeof(payload));
+    module_.sendResponse(BusproOp::CONTROL_SINGLE.resp(), 0xFFFF, payload, sizeof(payload));
 }
 
 void RelayController::handleReversingControl(const BusproFrame &frame)
@@ -62,7 +62,7 @@ void RelayController::handleReversingControl(const BusproFrame &frame)
     module_.setRelay(channel, newState);
 
     uint8_t payload[] = {lightChannelNo, BusproOp::SUCCESS, Brightness, RELAY_CHANNEL_COUNT, 0};
-    module_.sendResponse(BusproOp::CONTROL_REVERSING.resp(), frame.srcAddress, payload, sizeof(payload));
+    module_.sendResponse(BusproOp::CONTROL_REVERSING.resp(), 0xFFFF, payload, sizeof(payload));
 }
 
 void RelayController::handleReadStatusRequest(const BusproFrame &frame)
@@ -76,7 +76,7 @@ void RelayController::handleReadStatusRequest(const BusproFrame &frame)
         relayToBrightness(module_.getRelay(2)),
         relayToBrightness(module_.getRelay(3))};
 
-    module_.sendResponse(BusproOp::READ_STATE.resp(), frame.srcAddress, payload, sizeof(payload));
+    module_.sendResponse(BusproOp::READ_STATE.resp(), 0xFFFF, payload, sizeof(payload));
 }
 
 uint8_t RelayController::relayToBrightness(uint8_t brighness)

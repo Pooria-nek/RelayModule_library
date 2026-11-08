@@ -3,14 +3,6 @@
 #include <cstdint>
 #include <climits>
 
-struct CurtainInfo
-{
-    uint8_t enable;
-    uint8_t runningMinutes;
-    uint8_t runningSeconds;
-    uint8_t runningMilliseconds;
-};
-
 template <
     uint32_t BaseAddress,
     uint8_t ChannelCount>
@@ -124,6 +116,14 @@ public:
     }
 
 private:
+    struct CurtainInfo
+    {
+        uint8_t enable;
+        uint8_t runningMinutes;
+        uint8_t runningSeconds;
+        uint8_t runningMilliseconds;
+    };
+
     static constexpr uint32_t SECTOR_SIZE = 0x1000;
     static constexpr uint32_t MAIN_SECTOR = BaseAddress;
 

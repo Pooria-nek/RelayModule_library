@@ -29,7 +29,7 @@ static_assert(offsetof(ZoneInfo, scenePoweronNum) == 33);
 static_assert(offsetof(ZoneScene, channelStates) == 32);
 
 template <
-    uint32_t MainSector,
+    uint32_t BaseAddress,
     uint8_t ChannelCount>
 class ZoneStorage
 {
@@ -38,9 +38,9 @@ public:
     using Scene = ZoneScene;
 
     static constexpr uint32_t SECTOR_SIZE = 0x1000;
-    static constexpr uint32_t MAIN_SECTOR = MainSector;
+    static constexpr uint32_t MAIN_SECTOR = BaseAddress;
 
-    static constexpr uint32_t BASE_ADDRESS = (MAIN_SECTOR + 1) * SECTOR_SIZE;
+    static constexpr uint32_t BASE_ADDRESS = MAIN_SECTOR * SECTOR_SIZE;
 
     static constexpr uint32_t INFO_OFFSET = 0x0000;
     static constexpr uint32_t SCENE_OFFSET = 0x0060;
@@ -65,7 +65,7 @@ public:
 
     static constexpr bool validScene(uint16_t scene)
     {
-        return scene >= 0 && scene <= SCENE_COUNT;
+        return scene <= SCENE_COUNT;
     }
 
     static constexpr bool validChannel(uint8_t channel)

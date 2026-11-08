@@ -1,6 +1,6 @@
 {
   "name": "RelayModule",
-  "version": "0.7.0",
+  "version": "1.0.0",
   "description": "Relay subdevice library for an HDL-Buspro-style RS485 bus. Implements scene control, channel configuration, zone management, and single/reversing channel control as a BusproCore subdevice, with state persisted via MemoryCore. Scene modify/remark persistence is still incomplete -- see README known issues.",
   "keywords": [
     "relay",

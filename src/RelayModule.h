@@ -126,6 +126,7 @@ public:
     // bool defineScene(uint8_t area, uint8_t scene, const bool states[RELAY_CHANNEL_COUNT]);
     // bool removeScene(uint8_t area, uint8_t scene);
 
+    void sendChannelState();
     void sendSuccess(uint16_t opcode, uint16_t dst);
     void sendResponse(uint16_t opcode, uint16_t dst, const uint8_t *payload, uint8_t payloadLen);
 
@@ -136,7 +137,7 @@ public:
 private:
     static constexpr const char *FACTORY_NAME = "Zeller 4R";
     static constexpr const char *HARDWARE_VERSION = "Non latch";
-    static constexpr const char *SOFTWARE_VERSION = "v1.0.0-beta";
+    static constexpr const char *SOFTWARE_VERSION = "v1.0.0 " __DATE__;
 
     static constexpr uint32_t flashAddress = 50; // its the refrens address of data on memoryflash
 
@@ -145,7 +146,7 @@ private:
         RELAY_CHANNEL_COUNT>;
 
     using ZoneStorageLayout = ZoneStorage<
-        flashAddress,       // Main sector index
+        flashAddress + 1,   // Main sector index
         RELAY_CHANNEL_COUNT // Channel count: 8 zones, 16 scenes per zone
         >;
 
@@ -155,7 +156,9 @@ private:
     BusproTransport &bus_;
     MemoryCore &flash_;
 
-    uint16_t deviceAddress_ = 0x0141;
+    const uint16_t defultAddress = 0x010A;
+
+    uint16_t deviceAddress_ = defultAddress;
     uint8_t fuid_[12];
     uint8_t uid_[12];
     uint16_t devType_ = RELAY_TYPE; // 4R device type per HDL spec
@@ -171,6 +174,9 @@ private:
     uint8_t relayProtect_[RELAY_CHANNEL_COUNT] = {0};
 
     RelayController controllerFunction;
+
+    bool brodcastState = true;
+    uint32_t lastBrodcast = 0;
 
     /////////////////////////////// BASIC INFORMATION ///////////////////////////////
 
@@ -235,4 +241,6 @@ private:
 
     void handleReadDeviceRemark(const BusproFrame &frame);
     void handleModifyDeviceRemark(const BusproFrame &frame);
+
+    void handleSceneControl(const BusproFrame &frame);
 };

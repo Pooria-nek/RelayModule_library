@@ -36,6 +36,15 @@ bool RelayModule::begin()
 
 void RelayModule::update()
 {
+    if (brodcastState)
+    {
+        if (millis() - lastBrodcast <= 1000)
+        {
+            sendChannelState();
+
+            brodcastState = false;
+        }
+    }
 }
 
 bool RelayModule::firstime()
@@ -73,42 +82,43 @@ bool RelayModule::reMatch()
 
 bool RelayModule::init()
 {
+    deviceAddress_ = defultAddress;
     uint8_t payload[2] = {static_cast<uint8_t>(deviceAddress_ >> 8), static_cast<uint8_t>(deviceAddress_ & 0xFF)};
-    flash_.write(InfoStorageLayout::deviceAddress(), payload, sizeof(payload));
+    flash_.update(InfoStorageLayout::deviceAddress(), payload, sizeof(payload));
 
     uint8_t payload1[2] = {static_cast<uint8_t>(devType_ >> 8), static_cast<uint8_t>(devType_ & 0xFF)};
-    flash_.write(InfoStorageLayout::deviceTypeAddress(), payload1, sizeof(payload1));
+    flash_.update(InfoStorageLayout::deviceTypeAddress(), payload1, sizeof(payload1));
 
-    // // MCU UID
-    // const uint8_t *uid = mcu::getMcuUID();
-    // flash_.write(InfoStorageLayout::deviceMacAddress(), uid, sizeof(uid));
+    // MCU UID
+    const uint8_t *uid = reinterpret_cast<const uint8_t *>(0x1FFFF7E8U);
+    flash_.update(InfoStorageLayout::deviceMacAddress(), uid, sizeof(uid));
 
-    flash_.write(InfoStorageLayout::deviceRemarkAddress(), FACTORY_NAME, 20);
-    flash_.write(InfoStorageLayout::hardwareVersionAddress(), HARDWARE_VERSION, 30);
-    flash_.write(InfoStorageLayout::softwareVersionAddress(), SOFTWARE_VERSION, 20);
+    flash_.update(InfoStorageLayout::deviceRemarkAddress(), FACTORY_NAME, 20);
+    flash_.update(InfoStorageLayout::hardwareVersionAddress(), HARDWARE_VERSION, 30);
+    flash_.update(InfoStorageLayout::softwareVersionAddress(), SOFTWARE_VERSION, 20);
 
     char remark[20];
     for (size_t i = 1; i <= RELAY_CHANNEL_COUNT; i++)
     {
         snprintf(remark, sizeof(remark), "Relay %d", static_cast<unsigned>(i));
-        flash_.write(InfoStorageLayout::channelRemarkAddress(i), remark, sizeof(remark));
+        flash_.update(InfoStorageLayout::channelRemarkAddress(i), remark, sizeof(remark));
 
         uint8_t enable = 0x01;
 
-        flash_.write(InfoStorageLayout::channelEnableAddress(i), &enable, 1);
-        flash_.write(InfoStorageLayout::channelOnDelayAddress(i), 0, 1);
-        flash_.write(InfoStorageLayout::channelOnProtectAddress(i), 0, 1);
+        flash_.update(InfoStorageLayout::channelEnableAddress(i), &enable, 1);
+        flash_.update(InfoStorageLayout::channelOnDelayAddress(i), 0, 1);
+        flash_.update(InfoStorageLayout::channelOnProtectAddress(i), 0, 1);
 
         uint8_t defzone = 0x01;
 
-        flash_.write(InfoStorageLayout::channelZoneAddress(i), &defzone, 1);
+        flash_.update(InfoStorageLayout::channelZoneAddress(i), &defzone, 1);
     }
 
     for (uint8_t z = 1; z <= ZoneStorageLayout::ZONE_COUNT; ++z)
     {
-        flash_.write(ZoneStorageLayout::scenePoweronEnAddress(z), 0, 1);
+        flash_.update(ZoneStorageLayout::scenePoweronEnAddress(z), 0, 1);
 
-        flash_.write(ZoneStorageLayout::scenePoweronNumAddress(z), 0, 1);
+        flash_.update(ZoneStorageLayout::scenePoweronNumAddress(z), 0, 1);
 
         // Initialize zone remark
         snprintf(remark, sizeof(remark), "Zone %u", static_cast<unsigned>(z));
@@ -117,7 +127,7 @@ bool RelayModule::init()
         if (zoneAddress == UINT32_MAX)
             return false;
 
-        flash_.write(zoneAddress + offsetof(ZoneInfo, remark), reinterpret_cast<const uint8_t *>(remark), sizeof(remark));
+        flash_.update(zoneAddress + offsetof(ZoneInfo, remark), reinterpret_cast<const uint8_t *>(remark), sizeof(remark));
 
         // Initialize scene remarks
         for (uint8_t s = 1; s <= ZoneStorageLayout::SCENE_COUNT; ++s)
@@ -128,8 +138,14 @@ bool RelayModule::init()
             if (sceneAddress == UINT32_MAX)
                 return false;
 
-            flash_.write(sceneAddress, reinterpret_cast<const uint8_t *>(remark), sizeof(remark));
+            flash_.update(sceneAddress, reinterpret_cast<const uint8_t *>(remark), sizeof(remark));
         }
+    }
+
+    uint8_t value[RELAY_CHANNEL_COUNT] = {0, 0, 0, 0};
+    for (size_t i = 0; i <= 8; i++)
+    {
+        flash_.update(ZoneStorageLayout::channelStatesAddress(1, i), value, RELAY_CHANNEL_COUNT);
     }
 
     return true;
@@ -141,10 +157,10 @@ bool RelayModule::syncValues()
     flash_.read(InfoStorageLayout::deviceAddress(), payload, sizeof(payload));
     deviceAddress_ = (static_cast<uint16_t>(payload[0]) << 8) | payload[1];
 
-    // flash_.read(InfoStorageLayout::deviceMacAddress(), uid_);
+    flash_.read(InfoStorageLayout::deviceMacAddress(), uid_, sizeof(uid_));
     flash_.read(InfoStorageLayout::channelEnableAddress(), relayEnable_, sizeof(relayEnable_));
-    flash_.read(InfoStorageLayout::channelOnDelayAddress(), relayDelay_, sizeof(relayEnable_));
-    flash_.read(InfoStorageLayout::channelOnProtectAddress(), relayProtect_, sizeof(relayEnable_));
+    flash_.read(InfoStorageLayout::channelOnDelayAddress(), relayDelay_, sizeof(relayDelay_));
+    flash_.read(InfoStorageLayout::channelOnProtectAddress(), relayProtect_, sizeof(relayProtect_));
 
     // maxZone();
 
@@ -330,7 +346,7 @@ void RelayModule::process(const BusproFrame &frame)
             /////////////////////////////// RELAY CONTROLL ///////////////////////////////
 
         case BusproOp::READ_STATE.req():
-            // controllerFunction.handleReadStatusRequest(frame);
+            controllerFunction.handleReadStatusRequest(frame);
             break;
 
         case BusproOp::CONTROL_SINGLE.req():
@@ -341,12 +357,29 @@ void RelayModule::process(const BusproFrame &frame)
             controllerFunction.handleReversingControl(frame);
             break;
 
+        case BusproOp::SCENE_CONTROL.req():
+            handleSceneControl(frame);
         default:
             break;
         }
 
         return;
     }
+}
+
+void RelayModule::sendChannelState()
+{
+    uint8_t payload[7] = {0,0,0,0,0,0,0};
+
+    payload[4] = RELAY_CHANNEL_COUNT;
+
+    for (uint8_t i = 0; i < 4; i++)
+    {
+        if (relayState_[i])
+            payload[5] |= (1 << i);
+    }
+
+    bus_.send(deviceAddress_, devType_, BusproOp::CHANNEL_STATE, 0xFFFF, payload, sizeof(payload));
 }
 
 // for sending 1 byte success
@@ -569,12 +602,15 @@ void RelayModule::handleSceneRead(const BusproFrame &frame)
 
     uint8_t zone = frame.payload[0];
     uint8_t scene = frame.payload[1];
-    uint8_t minute = frame.payload[2];
-    uint8_t second = frame.payload[3];
 
     uint8_t payload[4 + RELAY_CHANNEL_COUNT];
 
-    flash_.read(ZoneStorageLayout::channelStatesAddress(zone, scene), payload + 2, RELAY_CHANNEL_COUNT);
+    payload[0] = zone;
+    payload[1] = scene;
+    payload[2] = 0; // minute
+    payload[3] = 0; // second
+
+    flash_.read(ZoneStorageLayout::channelStatesAddress(zone, scene), payload + 4, RELAY_CHANNEL_COUNT);
 
     sendResponse(BusproOp::Relay::SCENE_READ.resp(), frame.srcAddress, payload, sizeof(payload));
 }
@@ -588,7 +624,7 @@ void RelayModule::handleSceneModify(const BusproFrame &frame)
     uint8_t minute = frame.payload[2];
     uint8_t second = frame.payload[3];
 
-    flash_.update(ZoneStorageLayout::channelStatesAddress(zone, scene), frame.payload + 2, RELAY_CHANNEL_COUNT);
+    flash_.update(ZoneStorageLayout::channelStatesAddress(zone, scene), frame.payload + 4, RELAY_CHANNEL_COUNT);
 
     sendSuccess(BusproOp::Relay::SCENE_MODIFY.resp(), frame.srcAddress);
 }
@@ -813,7 +849,14 @@ void RelayModule::handleModifyDeviceRemark(const BusproFrame &frame)
     if (frame.payloadLen != 20)
         return;
 
-    flash_.update(InfoStorageLayout::deviceRemarkAddress(), frame.payload, frame.payloadLen);
+    if (strncmp(reinterpret_cast<const char *>(frame.payload), "INITIALIZATION", 14) == 0)
+    {
+        init();
+    }
+    else
+    {
+        flash_.update(InfoStorageLayout::deviceRemarkAddress(), frame.payload, frame.payloadLen);
+    }
 
     sendSuccess(BusproOp::DEVICE_REMARK.writeResp(), frame.srcAddress);
 }
@@ -821,3 +864,28 @@ void RelayModule::handleModifyDeviceRemark(const BusproFrame &frame)
 /////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////// UNIVERSAL REQUEST ///////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////
+
+void RelayModule::handleSceneControl(const BusproFrame &frame)
+{
+    if (frame.payloadLen < 2)
+        return;
+
+    uint8_t zone = frame.payload[0];
+    uint8_t scene = frame.payload[1];
+
+    uint8_t value[RELAY_CHANNEL_COUNT];
+
+    flash_.read(ZoneStorageLayout::channelStatesAddress(zone, scene), value, RELAY_CHANNEL_COUNT);
+
+    setRelay(0, value[0]);
+    setRelay(1, value[1]);
+    setRelay(2, value[2]);
+    setRelay(3, value[3]);
+
+    brodcastState = true;
+    lastBrodcast = millis();
+
+    uint8_t payload[5] = {zone, scene, RELAY_CHANNEL_COUNT, 0, 0};
+
+    sendResponse(BusproOp::SCENE_CONTROL.resp(), 0xFFFF, payload, sizeof(payload));
+}
