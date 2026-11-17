@@ -1,5 +1,4 @@
 #include "RelayModule.h"
-#include "Helpers.h"
 #include "RelayController.h"
 
 RelayController::RelayController(RelayModule &module)

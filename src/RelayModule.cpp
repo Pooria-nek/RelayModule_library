@@ -369,14 +369,14 @@ void RelayModule::process(const BusproFrame &frame)
 
 void RelayModule::sendChannelState()
 {
-    uint8_t payload[7] = {0,0,0,0,0,0,0};
+    uint8_t payload[7] = {0, 0, 0, 0, 0, 0, 0};
 
-    payload[4] = RELAY_CHANNEL_COUNT;
+    payload[0] = 1;
 
     for (uint8_t i = 0; i < 4; i++)
     {
         if (relayState_[i])
-            payload[5] |= (1 << i);
+            payload[3] |= (1 << i);
     }
 
     bus_.send(deviceAddress_, devType_, BusproOp::CHANNEL_STATE, 0xFFFF, payload, sizeof(payload));
@@ -875,12 +875,22 @@ void RelayModule::handleSceneControl(const BusproFrame &frame)
 
     uint8_t value[RELAY_CHANNEL_COUNT];
 
-    flash_.read(ZoneStorageLayout::channelStatesAddress(zone, scene), value, RELAY_CHANNEL_COUNT);
+    if (scene == 0)
+    {
+        setRelay(0, 0);
+        setRelay(1, 0);
+        setRelay(2, 0);
+        setRelay(3, 0);
+    }
+    else
+    {
+        flash_.read(ZoneStorageLayout::channelStatesAddress(zone, scene), value, RELAY_CHANNEL_COUNT);
 
-    setRelay(0, value[0]);
-    setRelay(1, value[1]);
-    setRelay(2, value[2]);
-    setRelay(3, value[3]);
+        setRelay(0, value[0]);
+        setRelay(1, value[1]);
+        setRelay(2, value[2]);
+        setRelay(3, value[3]);
+    }
 
     brodcastState = true;
     lastBrodcast = millis();

@@ -137,7 +137,7 @@ public:
 private:
     static constexpr const char *FACTORY_NAME = "Zeller 4R";
     static constexpr const char *HARDWARE_VERSION = "Non latch";
-    static constexpr const char *SOFTWARE_VERSION = "v1.0.0 " __DATE__;
+    static constexpr const char *SOFTWARE_VERSION = "v1.0.0b " __DATE__;
 
     static constexpr uint32_t flashAddress = 50; // its the refrens address of data on memoryflash
 
