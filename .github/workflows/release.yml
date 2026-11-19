@@ -17,4 +17,5 @@ permissions:
 jobs:
   release:
     uses: Pooria-nek/github-actions/.github/workflows/platformio-release.yml@main
-    
+    secrets: 
+      PLATFORMIO_AUTH_TOKEN: ${{ secrets.PLATFORMIO_AUTH_TOKEN }}
